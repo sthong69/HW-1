@@ -44,17 +44,16 @@ def normalize(list):
     return res
 
 y = extract_features(df_train, [9])
+print(y)
 min_max_y = extract_mins_maxs(y)
 y = normalize(y)
-print(y)
 # Remove the first value (since we are trying to predict PM2.5 based on previous hour)
 y = y[0][1:]
-print(y)
 
 X = extract_features(df_train, features_index)
+print(X)
 mins_maxs_x = extract_mins_maxs(X)
 X = normalize(X)
-print(X)
 # Remove the last value for each features list (since we are trying to predict PM2.5 based on previous hour)
 
 def offset(list):
@@ -64,7 +63,6 @@ def offset(list):
     return np.vstack(res)
 
 X = offset(X)
-print(X)
 
 def linear_regression(target,features):
     X = features.copy()
@@ -75,5 +73,61 @@ def linear_regression(target,features):
     y = np.nan_to_num(target)
     return np.matmul(np.matmul(np.linalg.inv(np.matmul(tX,X)), tX), y.T)
 
-# Faut que je dé-"normalize"
-print(linear_regression(y,X))
+coeffs = linear_regression(y,X)
+print(coeffs)
+
+def unnormalize(coeffs,mins_maxs):
+    res = coeffs.copy()
+    for i in range(len(coeffs)-1):
+        res[i] = (coeffs[i]*(mins_maxs[0][0] - mins_maxs[1][0])+mins_maxs[1][0])
+    return res
+
+coeffs_normalized = unnormalize(coeffs,mins_maxs_x)
+print(coeffs_normalized)
+
+def r2_score(y,X,m,c):
+    y_no_nan = np.nan_to_num(y)
+    X_no_nan = np.nan_to_num(X)
+    ss_t = 0
+    ss_r = 0
+    for i in range(int(len(X_no_nan))):
+        y_pred = c + m * X_no_nan[i]
+        ss_t += (y_no_nan[i] - np.mean(y_no_nan)) ** 2
+        ss_r += (y_no_nan[i] - y_pred) ** 2
+    return 1 - (ss_r/ss_t)
+
+def plot(y_values,X_values,m,c):
+    X_values_norm = [i*(mins_maxs_x[0][0] - mins_maxs_x[1][0])+mins_maxs_x[1][0] for i in X_values]
+    y_values_norm = [i*(min_max_y[0][0] - min_max_y[1][0])+min_max_y[1][0] for i in y_values]
+
+    # Plot the regression line along with the data points
+    x = np.linspace(np.nanmax(X_values_norm), np.nanmin(y_values_norm), 100)
+    y = c + m * x
+
+    plt.plot(x, y, color='#58b970', label='Regression Line')
+    plt.scatter(X_values_norm, y_values_norm, c='#ef5423', label='data points')
+
+    plt.xlabel('Value of the feature "AMB_TEMP" (H-1)')
+    plt.ylabel('Value of PM 2.5')
+    plt.legend()
+    plt.title('R2: ' + str(r2_score(y_values_norm, X_values_norm, m, c)))
+    plt.show()
+
+plot(y,X[0],coeffs_normalized[1],coeffs_normalized[0])
+
+"""
+def linear_regression_test(x, y):
+    X,Y= np.nan_to_num(x),np.nan_to_num(y)
+    mean_x, mean_y = np.mean(X),np.mean(Y)
+    m = len(X)
+    numer = 0
+    denom = 0
+    for i in range(m):
+        numer += (X[i] - mean_x) * (Y[i] - mean_y)
+        denom += (X[i] - mean_x) ** 2
+    m = numer / denom
+    c = mean_y - (m * mean_x)
+    return m,c 
+
+print(linear_regression_test(offset(extract_features(df_train, features_index))[0],extract_features(df_train, [9])[0][1:]))
+"""

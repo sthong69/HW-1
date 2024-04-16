@@ -31,9 +31,8 @@ def plotChart(iterations, cost_num):
     plt.show()
 
 # indexs du GOAT : 0,2,4,7,8,9,10,11,12,15,16
-features_index = [0,2,4,7,8,9,10,11,12,15,16]
-features_index = [8,9]
-
+# indexs de Noah 0,1,2,3,4,5,6,7,8,10,13,14
+features_index = [0,1,2,3,4,5,6,7,8,10,13,14]
 
 def extract_feature(dataframe, index_of_feature):
    return dataframe.loc[dataframe['ItemName'] == dataframe.loc[index_of_feature].at["ItemName"], '0':'23']

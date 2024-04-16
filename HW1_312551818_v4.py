@@ -1,14 +1,14 @@
 import csv
 from datetime import datetime
-import pandas as pd
+import random
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
-df_train = pd.read_csv('train.csv')
-df_test = pd.read_csv('test.csv')
-
-# 8, 9
-features_index = [8,9]
+# indexs du GOAT : 0,2,4,7,8,9,10,11,12,15,16
+# indexs de Noah 0,1,2,3,4,5,6,7,8,10,13,14
+features_index = [0,1,2,3,4,5,6,7,8,10,13,14]
 
 def extract_feature(dataframe, index_of_feature):
    return dataframe.loc[dataframe['ItemName'] == dataframe.loc[index_of_feature].at["ItemName"], '0':'23']
@@ -18,7 +18,7 @@ def convert_to_int_dataframe(dataframe):
     # Replace invalid data with a "NaN" error value
     for i in res.columns:
       res[i] = pd.to_numeric(res[i],errors='coerce')
-    return np.nan_to_num(res)
+    return (res.interpolate(method="polynomial", order=3, limit=None)).to_numpy()
 
 def extract_features(dataframe, list_features_index):
     res = []
@@ -28,31 +28,15 @@ def extract_features(dataframe, list_features_index):
         res.append(features.reshape(features.shape[0]*features.shape[1]))
     return np.vstack(res)
 
-def extract_mins_maxs(list):
-    res_maxs, res_mins = [],[]
-    for i in range(len(list)):
-        res_maxs.append(np.max(list[i]))
-        res_mins.append(np.min(list[i]))
-    return res_maxs, res_mins
-
-def normalize(list):
-    res = list.copy()
-    maxs, mins = extract_mins_maxs(list)
-    for i in range(len(list)):
-        for j in range(len(list[0])):
-                res[i][j] = (list[i][j]-mins[i])/(maxs[i]-mins[i])
-    return res
+df_train = pd.read_csv('train.csv')
 
 y = extract_features(df_train, [9])
-print(y)
-min_max_y = extract_mins_maxs(y)
 # Remove the first value (since we are trying to predict PM2.5 based on previous hour)
 y = y[0][1:]
 
+y = np.transpose(y)
+
 X = extract_features(df_train, features_index)
-mins_maxs_x = extract_mins_maxs(X)
-X = normalize(X)
-# Remove the last value for each features list (since we are trying to predict PM2.5 based on previous hour)
 
 def offset(list):
     res = []
@@ -61,48 +45,60 @@ def offset(list):
     return np.vstack(res)
 
 X = offset(X)
+
+def interpolate_manuel(arr):
+    interpolated_arr = arr.copy()
+    for i in range(len(arr)):
+        for j in range(len(arr[0])):
+            if np.isnan(arr[i][j]):
+                # Rechercher les indices précédent et suivant la valeur invalide
+                prev_index = j - 1
+                next_index = j + 1
+                while prev_index >= 0 and np.isnan(arr[i][prev_index]):
+                    prev_index -= 1
+                while next_index < len(arr) and np.isnan(arr[i][next_index]):
+                    next_index += 1
+
+                # Calculer la valeur interpolée en fonction des valeurs voisines valides
+                if prev_index >= 0 and next_index < len(arr):
+                    interpolated_arr[i][j] = (arr[i][prev_index] + arr[i][next_index]) / 2
+                elif prev_index >= 0:
+                    interpolated_arr[i][j] = arr[i][prev_index]
+                elif next_index < len(arr):
+                    interpolated_arr[i][j] = arr[i][next_index]
+                else:
+                # Si aucune valeur valide n'est trouvée avant ou après, remplacer par 0
+                    interpolated_arr[i] = 0
+    return interpolated_arr
+
+X = interpolate_manuel(X)
+
+print(y)
 print(X)
 
-def linear_regression(target, features):
+def linear_regression(target, features, lamb=0.1):
     X = features.copy()
     X = np.concatenate((np.ones((1,len(X[0]))), X),axis=0)
     X = np.transpose(X)
     tX = X.T
     y = np.nan_to_num(target)
-    return np.matmul(np.matmul(np.linalg.inv(np.matmul(tX,X)), tX), y.T)
+    return np.matmul(np.matmul(np.linalg.inv(np.matmul(tX,X) + lamb * np.identity(len(X[0]))), tX), y.T)
 
 coeffs = linear_regression(y,X)
 print(coeffs)
 
 def plot(y_values,X_values,m,c):
-    X_values_norm = [i*(mins_maxs_x[0][0] - mins_maxs_x[1][0])+mins_maxs_x[1][0] for i in X_values]
-    y_values_norm = [i*(min_max_y[0][0] - min_max_y[1][0])+min_max_y[1][0] for i in y_values]
-
     # Plot the regression line along with the data points
-    x = np.linspace(np.nanmax(X_values_norm), np.nanmin(y_values_norm), 100)
+    x = np.linspace(np.nanmax(X_values), np.nanmin(y_values), 100)
     y = c + m * x
 
-    # plt.plot(x, y, color='#58b970', label='Regression Line')
-    plt.scatter(X_values_norm, y_values_norm, c='#ef5423', label='data points')
+    plt.plot(x, y, color='#58b970', label='Regression Line')
+    plt.scatter(X_values, y_values, c='#ef5423', label='data points')
 
-    plt.xlabel('Value of the feature "AMB_TEMP" (H-1)')
+    plt.xlabel('Value of the feature (H-1)')
     plt.ylabel('Value of PM 2.5')
     plt.legend()
-    plt.title('R2: ' + str(r2_score(y_values_norm, X_values_norm, m, c)))
     plt.show()
-
-def r2_score(y,X,m,c):
-    y_no_nan = np.nan_to_num(y)
-    X_no_nan = np.nan_to_num(X)
-    ss_t = 0
-    ss_r = 0
-    for i in range(int(len(X_no_nan))):
-        y_pred = c + m * X_no_nan[i]
-        ss_t += (y_no_nan[i] - np.mean(y_no_nan)) ** 2
-        ss_r += (y_no_nan[i] - y_pred) ** 2
-    return 1 - (ss_r/ss_t)
-
-# plot(y,X[0],coeffs_normalized[1],coeffs_normalized[0])
 
 def extract_last(dataframe, list_features_index):
     res = []
@@ -115,16 +111,16 @@ def extract_last(dataframe, list_features_index):
 def extract_last_value(dataframe, index_of_feature):
    return dataframe.loc[dataframe['ItemName'] == dataframe.loc[index_of_feature].at["ItemName"], '8':'8']
 
+df_test = pd.read_csv('test.csv')
+
 test_values = extract_last(df_test,features_index)
 test_values = np.concatenate((np.ones((1,len(test_values[0]))), test_values),axis=0)
-print(test_values)
 
 def compute_pm25(values, c):
     return np.matmul(np.nan_to_num(values),c)
 
-results = compute_pm25(test_values.T,coeffs)
+results = compute_pm25(test_values.T, coeffs)
 print(results)
-print(len(results))
 
 def format_export_answers(missing_pm_values):
     print("Formating and writing answers in csv file...")
@@ -145,22 +141,5 @@ def format_export_answers(missing_pm_values):
 # Format and export the values for export
 format_export_answers(results)
 
+#plot(y.to_numpy(),X.to_numpy().T[0],theta[1],theta[0])
 
-
-
-"""
-def linear_regression_test(x, y):
-    X,Y= np.nan_to_num(x),np.nan_to_num(y)
-    mean_x, mean_y = np.mean(X),np.mean(Y)
-    m = len(X)
-    numer = 0
-    denom = 0
-    for i in range(m):
-        numer += (X[i] - mean_x) * (Y[i] - mean_y)
-        denom += (X[i] - mean_x) ** 2
-    m = numer / denom
-    c = mean_y - (m * mean_x)
-    return m,c 
-
-print(linear_regression_test(offset(extract_features(df_train, features_index))[0],extract_features(df_train, [9])[0][1:]))
-"""
